@@ -3,10 +3,80 @@ title: "F1 Project"
 output: html_notebook
 ---
 
- 
+```{r}
+library(tidyverse)
+```
+
+List of circuits and races (historical - present):
+
+```{r}
+circuits <- read.csv('../data/f1db_csv/circuits.csv') |> 
+  select(-url) |> 
+  rename(circuitName = name)
+races <- read.csv('../data/f1db_csv/races.csv') |> 
+  select(!(url:sprint_time)) |> 
+  rename(GPname = name, startTime = time)
+```
+
+Merging circuits and races:
+
+```{r}
+races_df <- full_join(races, circuits, by = join_by(circuitId))
+```
+
+```{r}
+races_2024 <- races_df |> 
+  filter(year == 2024)
+```
+
+Race results:
+
+```{r}
+results <- read.csv('../data/f1db_csv/results.csv')
+status <- read.csv('../data/f1db_csv/status.csv')
+drivers <- read.csv('../data/f1db_csv/drivers.csv')
+constructors <- read.csv('../data/f1db_csv/constructors.csv')
+qualifying <- read.csv('../data/f1db_csv/qualifying.csv')
+```
+
+Merge results and status, drivers, and constuctors (to add names to numbers):
+
+```{r}
+results_df <- left_join(results, status, by = join_by(statusId))
+```
+
+```{r}
+results_df <- left_join(results_df, races, by = join_by(raceId))
+```
+
+Reliability trend over the years (using percentage of cars that finished (/did not retire) in the race):
+
+```{r}
+results_df |> 
+  group_by(year) |> 
+  summarise(finishPercentage = (sum(positionText != 'R'))/(n=n())) |> 
+  ggplot(aes(x=year, y=finishPercentage)) +
+  geom_line()
+```
+
+Winning percentage:
+
+```{r}
+results_df <- left_join(results_df, constructors, by = join_by(constructorId)) |> 
+  select(!(nationality:url))
+```
+
+```{r}
+winning_percentage <- results_df |> 
+  group_by(year, constructorRef) |> 
+  summarise(winPercentage = (sum(positionText == '1'))/(n=n()/2))
+```
 
 ```{r}
 
 ```
 
+```{r}
+
+```
 
