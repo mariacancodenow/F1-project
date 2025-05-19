@@ -1,0 +1,16 @@
+library(shiny)
+library(shinythemes)
+library(leaflet)
+library(leaflet.extras2)
+library(sf)
+library(tidyverse)
+library(forcats)
+library(glue)
+library(DT)
+
+drivers <- read.csv('./data/drivers.csv')
+driver_standings_df <- read.csv('./data/driver_standings_df.csv')
+races_df <- read.csv('./data/races_df.csv')
+results_df <- read.csv('./data/results_df.csv')
+
+nationalities <- read.csv('./data/nationalities.csv')

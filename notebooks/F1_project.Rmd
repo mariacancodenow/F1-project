@@ -5,6 +5,8 @@ output: html_notebook
 
 ```{r}
 library(tidyverse)
+library(leaflet)
+library(sf)
 ```
 
 List of circuits and races (historical - present):
@@ -12,21 +14,32 @@ List of circuits and races (historical - present):
 ```{r}
 circuits <- read.csv('../data/f1db_csv/circuits.csv') |> 
   select(-url) |> 
-  rename(circuitName = name)
+  rename(circuitName = name) |> 
+  mutate(country = recode(country, "United States" = "USA"))
 races <- read.csv('../data/f1db_csv/races.csv') |> 
   select(!(url:sprint_time)) |> 
   rename(GPname = name, startTime = time)
 ```
 
+Geo-data (not used) :
+
+```{r}
+circuits_geo <- circuits |>
+ st_as_sf(coords = c("lng", "lat"), crs = 4326) |>
+ rename(circuit_location = geometry)
+```
+
 Merging circuits and races:
 
 ```{r}
-races_df <- full_join(races, circuits, by = join_by(circuitId))
+continents <- read.csv('../data/continents.csv') |> 
+  rename(country = Country, continent = Continent) |> 
+  mutate(country = recode(country, "United Kingdom" = "UK", "United Arab Emirates" = "UAE", "United States" = "USA"))
 ```
 
 ```{r}
-races_2024 <- races_df |> 
-  filter(year == 2024)
+races_df <- full_join(races, circuits, by = join_by(circuitId))
+races_df <- left_join(races_df, continents, by = join_by(country))
 ```
 
 Race results:
@@ -34,19 +47,85 @@ Race results:
 ```{r}
 results <- read.csv('../data/f1db_csv/results.csv')
 status <- read.csv('../data/f1db_csv/status.csv')
-drivers <- read.csv('../data/f1db_csv/drivers.csv')
-constructors <- read.csv('../data/f1db_csv/constructors.csv')
+drivers <- read.csv('../data/f1db_csv/drivers.csv') |> 
+  rename(driverNumber = number) |> 
+  mutate(birthYear = format(as.Date(dob),"%Y"))
+constructors <- read.csv('../data/f1db_csv/constructors.csv') |> 
+  select(-url) |> 
+  rename(contructorNationality = nationality)
 qualifying <- read.csv('../data/f1db_csv/qualifying.csv')
-```
-
-Merge results and status, drivers, and constuctors (to add names to numbers):
-
-```{r}
-results_df <- left_join(results, status, by = join_by(statusId))
+driver_standings <- read.csv('../data/f1db_csv/driver_standings.csv') |> 
+  select(-positionText) |> 
+  rename(YTDpoints = points, WDCposition = position)
 ```
 
 ```{r}
+driver_standings_df <- left_join(driver_standings, drivers, by = join_by(driverId))
+driver_standings_df <- left_join(driver_standings_df, races, by = join_by(raceId))
+```
+
+```{r}
+results_df <- results |> 
+  select(-c(milliseconds:fastestLapSpeed)) |> 
+  rename(finishPosition = position)
+results_df <- left_join(results_df, status, by = join_by(statusId))
+results_df <- left_join(results_df, constructors, by = join_by(constructorId))
+results_df <- left_join(results_df, driver_standings, by = join_by(raceId, driverId))
+results_df <- left_join(results_df, drivers, by = join_by(driverId))
 results_df <- left_join(results_df, races, by = join_by(raceId))
+```
+
+```{r}
+results_df <- results_df |> 
+  mutate(driverName = paste(forename, surname)) |> 
+  mutate(finishPosNum = as.numeric(finishPosition))
+```
+Creating csvs for the app:
+
+```{r}
+write.csv(results_df, '../data/results_df.csv', row.names=FALSE)
+write.csv(driver_standings_df, '../data/driver_standings_df.csv', row.names=FALSE)
+#write.csv(races_df, '../data/races_df.csv', row.names=FALSE)
+```
+
+------------------------------------------------------------------------
+
+need dfs:
+
+results_df contains the result for EVERY race with year and GP name, placements/finish status for every driver (and the constructor they race for)
+
+driver_standings_df contains the finishing status and point-status (as of that race) for every race; added to that from the drivers df the names, nationality, etc., and from races df the year, name, date, and start time of every race
+
+races_df lists every race
+
+stretch goal: drivers contains the name, nationality, and permanent number (if applicable, only 2014-), plus link to wiki page
+
+------------------------------------------------------------------------
+
+```{r}
+races_df |> 
+  filter(year == 2024) |> 
+  group_by(continent) |> 
+  summarise(count = n())
+```
+
+```{r}
+races_df |> 
+  filter(year==2024) |> 
+  leaflet() |>
+  #addProviderTiles('Esri.WorldImagery') |>
+  addTiles() |> 
+  setView(lng = 0, lat = 0, zoom =2) |> 
+  addCircleMarkers(data = races_2024,
+                   lng = ~lng,
+                   lat = ~lat,
+                   radius = 2,
+                   color = "red",
+                   fillOpacity = 1.0,
+                   #popup = ~as.character(location),
+                   popup = ~paste(location, ", ", country, sep=""),
+                   label = ~as.character(GPname)
+                   )
 ```
 
 Reliability trend over the years (using percentage of cars that finished (/did not retire) in the race):
@@ -57,6 +136,41 @@ results_df |>
   summarise(finishPercentage = (sum(positionText != 'R'))/(n=n())) |> 
   ggplot(aes(x=year, y=finishPercentage)) +
   geom_line()
+```
+
+```{r}
+#str_match(results_df$status, pattern = 'Lap')
+results_df |> 
+  filter(str_detect(status, pattern = 'Lap'))
+```
+
+```{r}
+results_df |> 
+  filter(year == 2024) |> 
+  filter(!(status == 'Finished'), !(str_detect(status, pattern = 'Lap'))) |>
+  ggplot(aes(x=status)) +
+  geom_bar() +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = "Non-finishing status")
+```
+
+```{r}
+results_df |> 
+  filter(!(status == 'Finished'), !(str_detect(status, pattern = 'Lap'))) |>
+  group_by(status) |> 
+  summarise(count = n())
+```
+
+```{r}
+results_df |> 
+  filter(!(status == 'Finished'), !(str_detect(status, pattern = 'Lap'))) |>
+  group_by(status) |> 
+  summarise(count = n()) |> 
+  filter(count > 1) |> 
+  ggplot(aes(x=status, y=count)) +
+  geom_col() +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = "Non-finishing status")
 ```
 
 Winning percentage:
@@ -73,10 +187,108 @@ winning_percentage <- results_df |>
 ```
 
 ```{r}
-
+winning_percentage |> 
+  filter(constructorRef %in% c('ferrari', 'mclaren', 'red_bull', 'mercedes')) |> 
+  ggplot(aes(x=year, y=winPercentage, colour = constructorRef)) +
+  geom_line()
 ```
 
 ```{r}
+nationalities <- drivers |> 
+  group_by(nationality) |> 
+  summarise(participated=n())
+```
 
+```{r}
+winners <- driver_standings_df |> 
+  group_by(year) |> 
+  slice_max(round) |> 
+  slice_max(points)
+```
+
+```{r}
+winners_by_nationality <- winners |> 
+  group_by(nationality) |> 
+  summarise(won=n())
+```
+
+```{r}
+nationalities <- left_join(nationalities, winners_by_nationality, by = join_by(nationality)) |> 
+  mutate_if(is.numeric,coalesce,0) |> 
+  mutate(win_percentage = won / participated)
+```
+
+```{r}
+drivers |> 
+  ggplot(aes(x = nationality)) +
+  geom_bar() +
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = "GP Participants by Nationality")
+```
+
+```{r}
+driver_standings_df |> 
+  group_by(year) |> 
+  slice_max(round) |> 
+  slice_max(points) |> 
+  ggplot(aes(x=nationality)) +
+  geom_bar()+
+  scale_x_discrete(guide = guide_axis(angle = 90))+
+  labs(title = "GP Winners by Nationality")
+```
+
+```{r}
+nationalities |> 
+  filter(win_percentage > 0) |> 
+  ggplot(aes(x=nationality, y=win_percentage)) +
+  geom_col()+
+  scale_x_discrete(guide = guide_axis(angle = 90)) +
+  labs(title = "GP Win Percentage by Nationality")
+```
+
+```{r}
+write.csv(nationalities, '../data/nationalities.csv', row.names=FALSE)
+```
+
+```{r}
+library(forcats)
+```
+
+
+```{r}
+results_df |> 
+  filter(year == 2024) |> 
+  filter(driverName == 'Lewis Hamilton') |>
+  #mutate(sort(raceId))
+  ggplot(aes(x=GPname, y=points)) +
+  geom_col() +
+  scale_x_discrete(guide = guide_axis(angle = 90))
+```
+
+```{r}
+results_df |> 
+  filter(year == 2024) |> 
+  filter(driverName == 'Lewis Hamilton')
+```
+
+```{r}
+races_df |> 
+      filter(year==2024) |>
+      group_by(continent) |> 
+      summarise(count = n()) |> 
+      mutate(percent = count/sum(count)*100)
+```
+
+Experimenting:
+
+```{r}
+library(rvest)
+```
+
+```{r}
+read_html('https://en.wikipedia.org/wiki/Max_Verstappen') |> 
+  html_elements('img')
+  #html_nodes('img') |> 
+  #html_attr('src')
 ```
 

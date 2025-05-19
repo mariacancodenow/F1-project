@@ -1,0 +1,12 @@
+name: F1_Project
+title: F1_project
+username: mariasprojects
+account: mariasprojects
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14008829
+bundleId: 9804676
+url: https://mariasprojects.shinyapps.io/F1_Project/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
